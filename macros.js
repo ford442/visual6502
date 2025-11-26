@@ -46,10 +46,48 @@ function resetBytesProcessed(){
 }
 function trackBytesProcessed(count){
         bytesProcessed += (count || 0);
+        performanceMonitor.recordBytes(count || 0);
 }
 function reportBytesProcessed(){
         return bytesProcessed;
 }
+
+var performanceMonitor = {
+        totalNodeWork: 0,
+        transistorSwitches: 0,
+        halfSteps: 0,
+        lastSnapshotTime: now(),
+        lastBytes: 0,
+        bytesPerSecond: 0,
+        recordNodeSweep: function(count){
+                if(!count) return;
+                this.totalNodeWork += count;
+        },
+        recordTransistorSwitch: function(){
+                this.transistorSwitches++;
+        },
+        recordHalfStep: function(){
+                this.halfSteps++;
+                this.maybeRefreshThroughput();
+        },
+        recordBytes: function(count){
+                if(!count) return;
+                this.maybeRefreshThroughput();
+        },
+        maybeRefreshThroughput: function(){
+                var nowMs = now();
+                var elapsed = nowMs - this.lastSnapshotTime;
+                if(elapsed < 500) return;
+                var currentBytes = reportBytesProcessed();
+                var delta = currentBytes - this.lastBytes;
+                this.bytesPerSecond = elapsed ? Math.round(delta*1000/elapsed) : 0;
+                this.lastBytes = currentBytes;
+                this.lastSnapshotTime = nowMs;
+        },
+        getSummary: function(){
+                return 'nodes:' + this.totalNodeWork + ' switches:' + this.transistorSwitches + ' b/s:' + this.bytesPerSecond;
+        }
+};
 
 function loadProgram(){
 	// a moderate size of static testprogram might be loaded

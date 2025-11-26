@@ -1,0 +1,17 @@
+{
+  "name": "visual6502",
+  "version": "1.0.0",
+  "description": "This is the JavaScript simulator from the visual6502.org project:\r www.visual6502.org/JSSim",
+  "main": "chipsim.js",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "lint": "eslint .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "esbuild": "^0.27.0"
+  }
+}
