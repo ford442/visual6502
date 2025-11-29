@@ -15,6 +15,28 @@ LOCAL_DIRECTORY = "dist"
 # The directory on the server where the files should go (e.g., 'public_html/wasm-game').
 REMOTE_DIRECTORY = "test.1ink.us/visual6502"
 
+# Create the dist directory if it doesn't exist
+os.makedirs('./dist', exist_ok=True)
+
+import shutil
+
+src_dir = '.'
+dst_dir = './dist'
+
+# Ensure the destination directory exists
+os.makedirs(dst_dir, exist_ok=True)
+
+# Define the extensions (Must be a tuple)
+extensions = ('.html', '.css', '.js')
+
+for filename in os.listdir(src_dir):
+    if filename.endswith(extensions):
+        src = os.path.join(src_dir, filename)
+        dst = os.path.join(dst_dir, filename)
+        
+        shutil.copy2(src, dst)
+        print(f"Copied {src} to {dst}")
+
 def upload_directory(sftp_client, local_path, remote_path):
     """
     Recursively uploads a directory and its contents to the remote server.
