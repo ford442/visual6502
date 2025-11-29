@@ -9,9 +9,6 @@ HOSTNAME = "1ink.us"
 PORT = 22  # Default SFTP/SSH port
 USERNAME = "ford442"
 
-# --- Project Configuration ---
-# The local directory to upload from.
-LOCAL_DIRECTORY = "dist"
 # The directory on the server where the files should go (e.g., 'public_html/wasm-game').
 REMOTE_DIRECTORY = "test.1ink.us/visual6502"
 
@@ -19,23 +16,41 @@ REMOTE_DIRECTORY = "test.1ink.us/visual6502"
 os.makedirs('./dist', exist_ok=True)
 
 import shutil
+# The local directory to upload from.
+LOCAL_DIRECTORY = "dist"
+# The directory on the server where the files should go
+REMOTE_DIRECTORY = "test.1ink.us/visual6502"
+
+# 1. Clean and Re-create the dist directory
+if os.path.exists(LOCAL_DIRECTORY):
+    shutil.rmtree(LOCAL_DIRECTORY)
+os.makedirs(LOCAL_DIRECTORY)
 
 src_dir = '.'
-dst_dir = './dist'
+dst_dir = LOCAL_DIRECTORY
 
-# Ensure the destination directory exists
-os.makedirs(dst_dir, exist_ok=True)
-
-# Define the extensions (Must be a tuple)
-extensions = ('.html', '.css', '.js')
+# 2. Copy specific file types from the root
+extensions = ('.html', '.css', '.js', '.json', '.md') # Added .json/.md just in case
 
 for filename in os.listdir(src_dir):
     if filename.endswith(extensions):
         src = os.path.join(src_dir, filename)
         dst = os.path.join(dst_dir, filename)
-        
         shutil.copy2(src, dst)
-        print(f"Copied {src} to {dst}")
+        print(f"Copied file: {filename}")
+
+# 3. Copy required directories (images, 3rdparty)
+directories_to_copy = ['images', '3rdparty']
+
+for item in directories_to_copy:
+    src_path = os.path.join(src_dir, item)
+    dst_path = os.path.join(dst_dir, item)
+    
+    if os.path.exists(src_path):
+        # copytree requires the destination to NOT exist usually, 
+        # but we just cleaned dist so it should be fine.
+        shutil.copytree(src_path, dst_path)
+        print(f"Copied directory: {item}")
 
 def upload_directory(sftp_client, local_path, remote_path):
     """
