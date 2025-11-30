@@ -3,10 +3,11 @@
 <head>
     <title>Visual 6502 - WebGPU Upgrade</title>
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: monospace; overflow: hidden; }
+        body { margin: 0; background: #050505; color: #fff; font-family: monospace; overflow: hidden; }
         canvas { display: block; width: 100vw; height: 100vh; }
-        #ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #444; }
+        #ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 10px; border: 1px solid #444; pointer-events: none;}
     </style>
+    <script src="https://unpkg.com/earcut@2.2.4/dist/earcut.min.js"></script>
 </head>
 <body>
     <div id="ui">
@@ -26,42 +27,37 @@
         const renderer = new WebGPURenderer(canvas);
         
         // Mock Node State (Simulation Stub)
-        // In the real app, this array comes from the chipsim step() function
         const numNodes = 6000;
         const nodeStates = new Array(numNodes).fill(0);
 
         async function main() {
             try {
-                // Ensure segdefs is loaded
-                if (typeof segdefs === 'undefined') {
-                    throw new Error("segdefs.js not loaded. Check file path.");
-                }
+                if (typeof segdefs === 'undefined') throw new Error("segdefs.js not loaded.");
+                if (typeof earcut === 'undefined') throw new Error("Earcut library not loaded.");
 
-                status.innerText = "Building Geometry...";
-                await renderer.init(segdefs);
-                status.innerText = "Running WebGPU";
+                status.innerText = "Processing Geometry...";
+                
+                // Allow UI to update before heavy processing
+                setTimeout(async () => {
+                    await renderer.init(segdefs);
+                    status.innerText = "Running WebGPU";
+                    loop();
+                }, 100);
 
-                // Animation Loop
                 let time = 0;
                 function loop() {
                     time += 0.01;
-
-                    // Simulate some blinking lights randomly
-                    for(let i=0; i<50; i++) {
+                    // Simulate random activity
+                    for(let i=0; i<100; i++) {
                         const rNode = Math.floor(Math.random() * numNodes);
                         nodeStates[rNode] = Math.random() > 0.5 ? 1 : 0;
                     }
                     
-                    // Upload State
                     renderer.updateNodeStates(nodeStates);
-
-                    // Render
-                    // params: time, zoom, panX, panY
-                    renderer.render(time, 1.0, 0.0, 0.0);
-
+                    // Params: time, zoom, panX, panY
+                    renderer.render(time, 0.9, 0.0, 0.0);
                     requestAnimationFrame(loop);
                 }
-                loop();
 
             } catch (e) {
                 console.error(e);
@@ -70,10 +66,10 @@
             }
         }
 
-        // Adjust canvas size
         function resize() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
+            if(renderer) renderer.resize(canvas.width, canvas.height);
         }
         window.addEventListener('resize', resize);
         resize();
