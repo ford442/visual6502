@@ -1,6 +1,9 @@
 /**
  * WebGPU Renderer for Visual6502
- * Handles geometry parsing, triangulation, and shader execution.
+ * Features:
+ * - Robust "Ear Clipping" triangulation for complex concave chip polygons.
+ * - Procedural "Cyber-Silicon" textures (No images required).
+ * - High-performance Storage Buffer for node states.
  */
 class WebGPURenderer {
     constructor(canvas) {
@@ -48,9 +51,9 @@ class WebGPURenderer {
 
         console.log("WebGPU Device Initialized");
 
-        // 1. Process Geometry (Convert segdefs to triangles)
+        // 1. Process Geometry (Now with Triangulation)
         const vertices = this.processGeometry(segdefs);
-        this.vertexCount = vertices.length / 4; // 4 floats per vertex
+        this.vertexCount = vertices.length / 4; 
 
         // 2. Create Vertex Buffer
         this.vertexBuffer = this.device.createBuffer({
@@ -62,25 +65,24 @@ class WebGPURenderer {
         new Float32Array(this.vertexBuffer.getMappedRange()).set(vertices);
         this.vertexBuffer.unmap();
 
-        // 3. Create Node State Buffer (Storage Buffer)
-        // Max 6502 nodes is around ~4000. We allocate enough for safety.
-        const maxNodes = 8000; 
+        // 3. Create Node State Buffer
+        // Max 6502 nodes ~4000. 
         this.nodeStateBuffer = this.device.createBuffer({
             label: "Node State Buffer",
-            size: maxNodes * 4, // 4 bytes per float
+            size: 10000 * 4, // Safety margin
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
 
-        // 4. Create Uniform Buffer (Time, Zoom, Pan)
+        // 4. Create Uniform Buffer
         this.uniformBuffer = this.device.createBuffer({
             label: "Uniform Buffer",
-            size: 64, // 4 floats * 4 bytes
+            size: 64, 
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
 
-        // 5. Generate Procedural Textures (So it works without external images)
-        this.substrateTexture = this.createProceduralTexture(0); // Cold Metal
-        this.activeTexture = this.createProceduralTexture(1);    // Hot Plasma
+        // 5. Generate Textures
+        this.substrateTexture = this.createProceduralTexture(0); 
+        this.activeTexture = this.createProceduralTexture(1);    
         
         this.sampler = this.device.createSampler({
             magFilter: 'linear',
@@ -100,7 +102,6 @@ class WebGPURenderer {
         // Step A: Calculate Bounds
         for (let i = 0; i < segdefs.length; i++) {
             const seg = segdefs[i];
-            // format: [nodeNum, pullup, layer, x1, y1, x2, y2, ...]
             for (let j = 3; j < seg.length; j += 2) {
                 const x = seg[j];
                 const y = seg[j+1];
@@ -113,45 +114,113 @@ class WebGPURenderer {
         this.bounds.width = this.bounds.maxX - this.bounds.minX;
         this.bounds.height = this.bounds.maxY - this.bounds.minY;
 
-        // Step B: Triangulate
+        // Step B: Triangulate Polygons
         const allVertices = [];
         
         for (let i = 0; i < segdefs.length; i++) {
             const seg = segdefs[i];
             const nodeIndex = seg[0];
-            const layer = seg[2]; // 0=Diffusion? 1=Poly? Check specific segdefs
+            const layer = seg[2]; 
             
-            // Extract polygon path
+            // Extract raw polygon path
             const path = [];
             for (let j = 3; j < seg.length; j += 2) {
-                // Normalize coordinates to 0..1
                 const nx = (seg[j] - this.bounds.minX) / this.bounds.width;
                 const ny = (seg[j+1] - this.bounds.minY) / this.bounds.height;
-                
-                // Flip Y because WebGPU (and 6502 data usually) have different origins
+                // Flip Y for rendering
                 path.push({ x: nx, y: 1.0 - ny });
             }
 
-            // Triangulate (Simple Fan for now - 6502 polys are mostly convex/rects)
-            // For a production robust version, use Earcut. Here we use a fan which works for 95% of traces.
-            // Triangles: 0-1-2, 0-2-3, 0-3-4...
-            for (let k = 1; k < path.length - 1; k++) {
-                const v0 = path[0];
-                const v1 = path[k];
-                const v2 = path[k+1];
+            // Run Ear Clipping Algorithm
+            const triangles = this.triangulate(path);
 
-                // Push vertices: [x, y, nodeIndex, layer]
-                allVertices.push(v0.x, v0.y, nodeIndex, layer);
-                allVertices.push(v1.x, v1.y, nodeIndex, layer);
-                allVertices.push(v2.x, v2.y, nodeIndex, layer);
+            // Push vertices to buffer array
+            for(let t=0; t<triangles.length; t++) {
+                const v = triangles[t];
+                allVertices.push(v.x, v.y, nodeIndex, layer);
             }
         }
 
         return new Float32Array(allVertices);
     }
 
+    // A robust Ear Clipping implementation to handle concave polygons
+    triangulate(path) {
+        if (path.length < 3) return [];
+
+        // 1. Ensure Counter-Clockwise (CCW) winding
+        let area = 0;
+        for (let i = 0; i < path.length; i++) {
+            const j = (i + 1) % path.length;
+            area += (path[j].x - path[i].x) * (path[j].y + path[i].y);
+        }
+        // If area is positive (in this coordinate system), it might be CW. 
+        // We clone and reverse if needed.
+        let rings = (area > 0) ? path.slice().reverse() : path.slice();
+        
+        const triangles = [];
+        let remaining = rings.length;
+        
+        // Safety: Prevent infinite loop on bad geometry
+        let iterations = 0;
+        const maxIterations = remaining * remaining * 2; 
+
+        while (remaining > 3 && iterations < maxIterations) {
+            iterations++;
+            let earFound = false;
+
+            for (let i = 0; i < remaining; i++) {
+                const prev = (i - 1 + remaining) % remaining;
+                const next = (i + 1) % remaining;
+                
+                const v0 = rings[prev];
+                const v1 = rings[i];
+                const v2 = rings[next];
+
+                // Check convexity (Cross Product)
+                const cp = (v1.x - v0.x) * (v2.y - v1.y) - (v1.y - v0.y) * (v2.x - v1.x);
+                
+                if (cp >= 0) { // Convex vertex
+                    // Check if any other point is inside this triangle
+                    let isEar = true;
+                    for (let j = 0; j < remaining; j++) {
+                        if (j === prev || j === i || j === next) continue;
+                        if (this.isPointInTriangle(rings[j], v0, v1, v2)) {
+                            isEar = false;
+                            break;
+                        }
+                    }
+
+                    if (isEar) {
+                        triangles.push(v0, v1, v2);
+                        rings.splice(i, 1);
+                        remaining--;
+                        earFound = true;
+                        break;
+                    }
+                }
+            }
+            if (!earFound) break; // Should not happen for valid simple polygons
+        }
+        
+        // Add the final triangle
+        if (remaining === 3) {
+            triangles.push(rings[0], rings[1], rings[2]);
+        }
+        
+        return triangles;
+    }
+
+    isPointInTriangle(p, a, b, c) {
+        const cross = (o, k, m) => (k.x - o.x) * (m.y - o.y) - (k.y - o.y) * (m.x - o.x);
+        const cp1 = cross(a, b, p);
+        const cp2 = cross(b, c, p);
+        const cp3 = cross(c, a, p);
+        // Point is inside if all cross products have the same sign
+        return (cp1 >= 0 && cp2 >= 0 && cp3 >= 0) || (cp1 <= 0 && cp2 <= 0 && cp3 <= 0);
+    }
+
     createProceduralTexture(type) {
-        // Generates a texture in memory so we don't need image files
         const size = 512;
         const canvas = document.createElement('canvas');
         canvas.width = size;
@@ -159,42 +228,50 @@ class WebGPURenderer {
         const ctx = canvas.getContext('2d');
 
         if (type === 0) { // Substrate (Cold)
-            ctx.fillStyle = '#1a1a1a';
+            // Dark oxidized metal
+            ctx.fillStyle = '#0a0a10';
             ctx.fillRect(0,0,size,size);
-            // Add noise
-            for(let i=0; i<5000; i++) {
-                ctx.fillStyle = `rgba(100, 100, 120, ${Math.random()*0.1})`;
-                ctx.fillRect(Math.random()*size, Math.random()*size, 2, 2);
+            
+            // Texture noise
+            for(let i=0; i<8000; i++) {
+                ctx.fillStyle = `rgba(150, 150, 160, ${Math.random()*0.05})`;
+                const s = Math.random()*2 + 1;
+                ctx.fillRect(Math.random()*size, Math.random()*size, s, s);
             }
-            // Add grid lines
-            ctx.strokeStyle = '#222';
+            
+            // Micro-circuit grid pattern
+            ctx.strokeStyle = 'rgba(255,255,255,0.03)';
             ctx.lineWidth = 1;
-            for(let i=0; i<size; i+=20) {
+            for(let i=0; i<size; i+=32) {
                 ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,size); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(size,i); ctx.stroke();
             }
         } else { // Active (Hot)
-            ctx.fillStyle = '#000';
+            ctx.fillStyle = '#000000';
             ctx.fillRect(0,0,size,size);
-            // Add plasma clouds
+            
+            // Neon plasma gradients
             const grad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size);
             grad.addColorStop(0, '#ff0055');
-            grad.addColorStop(0.5, '#aa00cc');
+            grad.addColorStop(0.4, '#aa00ff');
             grad.addColorStop(1, '#000000');
             ctx.fillStyle = grad;
             ctx.fillRect(0,0,size,size);
-            // Add electric sparks
-            ctx.strokeStyle = '#ffcc00';
+            
+            // Electric bolts
+            ctx.strokeStyle = '#ffddaa';
             ctx.lineWidth = 2;
-            for(let i=0; i<50; i++) {
+            ctx.lineCap = 'round';
+            for(let i=0; i<20; i++) {
                 ctx.beginPath();
                 ctx.moveTo(Math.random()*size, Math.random()*size);
-                ctx.lineTo(Math.random()*size, Math.random()*size);
+                for(let j=0; j<5; j++) {
+                    ctx.lineTo(Math.random()*size, Math.random()*size);
+                }
                 ctx.stroke();
             }
         }
 
-        // Upload to GPU
         const texture = this.device.createTexture({
             size: [size, size],
             format: 'rgba8unorm',
@@ -240,20 +317,17 @@ class WebGPURenderer {
             @vertex
             fn vs_main(in: VertexInput) -> VertexOutput {
                 var out: VertexOutput;
-                // Simple View Transform
+                
                 let worldPos = (in.position + uniforms.pan) * uniforms.zoom;
-                // Center it (approximate)
                 let centered = (worldPos - 0.5) * 2.0; 
                 
-                // Aspect Ratio Fix (assume square canvas for simplicity or pass aspect)
-                out.position = vec4<f32>(centered.x, -centered.y, 0.0, 1.0); // Flipped Y here
+                // Flip Y to match Canvas coords
+                out.position = vec4<f32>(centered.x, -centered.y, 0.0, 1.0);
                 
-                // UVs match the normalized position
                 out.uv = in.position;
                 
-                // Fetch State
+                // Fetch State safely
                 let idx = u32(in.nodeIdx);
-                // Safety check for index bounds
                 if (idx < arrayLength(&nodeStates)) {
                     out.state = nodeStates[idx];
                 } else {
@@ -266,22 +340,29 @@ class WebGPURenderer {
 
             @fragment
             fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-                let cold = textureSample(substrateTex, substrateSampler, in.uv * 5.0); // Tiled
+                // Background Metal
+                let cold = textureSample(substrateTex, substrateSampler, in.uv * 4.0);
                 
-                // Animate hot texture
-                let flow = vec2<f32>(uniforms.time * 0.2, 0.0);
-                let hot = textureSample(activeTex, substrateSampler, (in.uv * 5.0) + flow);
+                // Flowing Energy
+                let flow = vec2<f32>(uniforms.time * 0.15, sin(uniforms.time * 0.5) * 0.05);
+                let hot = textureSample(activeTex, substrateSampler, (in.uv * 4.0) + flow);
                 
-                // Blend based on state
-                let intensity = smoothstep(0.4, 0.6, in.state);
+                // Intensity Curve
+                let intensity = smoothstep(0.3, 0.9, in.state);
                 
-                // Layer tinting
+                // Material/Layer Tints
                 var tint = vec3<f32>(1.0);
-                if (in.layer < 0.5) { tint = vec3<f32>(0.5, 0.8, 1.0); } // Metal
-                else if (in.layer < 1.5) { tint = vec3<f32>(1.0, 0.3, 0.3); } // Poly
-                else { tint = vec3<f32>(0.2, 1.0, 0.2); } // Diffusion
+                if (in.layer < 0.5) { 
+                    tint = vec3<f32>(0.6, 0.8, 1.0); // Metal (Blue-ish)
+                } else if (in.layer < 1.5) { 
+                    tint = vec3<f32>(1.0, 0.2, 0.2); // Polysilicon (Red)
+                } else { 
+                    tint = vec3<f32>(0.2, 1.0, 0.4); // Diffusion (Green)
+                }
                 
-                let color = mix(cold.rgb * 0.5, hot.rgb * 2.0 * tint, intensity);
+                // Combine: Metal base + (Energy * Tint * Intensity)
+                // Added a 'bloom' cheat by multiplying by 2.5
+                let color = mix(cold.rgb * 0.4, hot.rgb * 2.5 * tint, intensity);
                 
                 return vec4<f32>(color, 1.0);
             }
@@ -295,7 +376,7 @@ class WebGPURenderer {
                 module: module,
                 entryPoint: 'vs_main',
                 buffers: [{
-                    arrayStride: 16, // 4 * 4 bytes
+                    arrayStride: 16, 
                     attributes: [
                         { shaderLocation: 0, offset: 0, format: 'float32x2' }, // pos
                         { shaderLocation: 1, offset: 8, format: 'float32' },   // nodeIdx
@@ -311,7 +392,6 @@ class WebGPURenderer {
             primitive: { topology: 'triangle-list' }
         });
 
-        // Create Bind Group
         this.bindGroup = this.device.createBindGroup({
             layout: this.pipeline.getBindGroupLayout(0),
             entries: [
@@ -327,16 +407,11 @@ class WebGPURenderer {
     updateNodeStates(nodes) {
         if (!this.isReady) return;
         
-        // Convert JS node array (which might be sparse or objects) to flat Float32
-        // Assumes 'nodes' is an array where index matches node number, or we need mapping.
-        // For visual6502, we might need a mapping array if node IDs are non-contiguous.
-        // Here we assume nodes[i] is the state (High/Low) of node ID i.
-        
-        // Optimization: Keep a persistent typed array and only upload when needed
         const data = new Float32Array(nodes.length);
         for(let i=0; i<nodes.length; i++) {
-            // Visual6502 usually stores state as boolean or 0/1
-            data[i] = nodes[i] ? 1.0 : 0.0;
+            // Handle both array[i] = 0/1 and array[i] = boolean
+            const val = nodes[i];
+            data[i] = (val && val > 0) ? 1.0 : 0.0;
         }
 
         this.device.queue.writeBuffer(this.nodeStateBuffer, 0, data);
@@ -345,7 +420,6 @@ class WebGPURenderer {
     render(time, zoom, panX, panY) {
         if (!this.isReady || !this.pipeline) return;
 
-        // Update Uniforms
         const uniforms = new Float32Array([time, zoom, panX, panY]);
         this.device.queue.writeBuffer(this.uniformBuffer, 0, uniforms);
 
@@ -353,7 +427,7 @@ class WebGPURenderer {
         const passEncoder = commandEncoder.beginRenderPass({
             colorAttachments: [{
                 view: this.context.getCurrentTexture().createView(),
-                clearValue: { r: 0.05, g: 0.05, b: 0.1, a: 1.0 },
+                clearValue: { r: 0.02, g: 0.02, b: 0.05, a: 1.0 },
                 loadOp: 'clear',
                 storeOp: 'store',
             }]
