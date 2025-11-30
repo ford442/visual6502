@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual 6502 - WebGPU Cyber-Silicon Renderer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #0a0a0f;
+            color: #00ffcc;
+            font-family: 'Courier New', monospace;
+            min-height: 100vh;
+        }
+        
+        .header {
+            padding: 20px;
+            background: linear-gradient(180deg, #0f1520 0%, #0a0a0f 100%);
+            border-bottom: 1px solid #00ffcc33;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            text-shadow: 0 0 10px #00ffcc;
+        }
+        
+        .header p {
+            color: #888;
+            margin-top: 5px;
+        }
+        
+        .container {
+            display: flex;
+            padding: 20px;
+            gap: 20px;
+        }
+        
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            background: #050508;
+            border: 1px solid #00ffcc33;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        #webgpu-canvas {
+            width: 100%;
+            height: 600px;
+            display: block;
+        }
+        
+        .sidebar {
+            width: 300px;
+            background: #0f1520;
+            border: 1px solid #00ffcc33;
+            border-radius: 4px;
+            padding: 20px;
+        }
+        
+        .control-group {
+            margin-bottom: 20px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #00ffcc;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+        
+        .control-group input[type="range"] {
+            width: 100%;
+            -webkit-appearance: none;
+            background: #1a1a2e;
+            height: 4px;
+            border-radius: 2px;
+            outline: none;
+        }
+        
+        .control-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #00ffcc;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        
+        .control-value {
+            text-align: right;
+            color: #888;
+            font-size: 11px;
+            margin-top: 4px;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: transparent;
+            border: 1px solid #00ffcc;
+            color: #00ffcc;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 12px;
+            text-transform: uppercase;
+            transition: all 0.3s ease;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .btn:hover {
+            background: #00ffcc;
+            color: #0a0a0f;
+        }
+        
+        .btn.active {
+            background: #00ffcc;
+            color: #0a0a0f;
+        }
+        
+        .status {
+            background: #1a1a2e;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+        
+        .status-label {
+            color: #666;
+        }
+        
+        .status-value {
+            color: #00ffcc;
+        }
+        
+        .status-value.error {
+            color: #ff4444;
+        }
+        
+        .status-value.success {
+            color: #44ff44;
+        }
+        
+        #error-message {
+            display: none;
+            padding: 20px;
+            background: #2a1a1a;
+            border: 1px solid #ff4444;
+            color: #ff8888;
+            margin: 20px;
+            border-radius: 4px;
+        }
+        
+        .fallback-info {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .fallback-info h2 {
+            color: #ff8888;
+            margin-bottom: 20px;
+        }
+        
+        .fallback-info a {
+            color: #00ffcc;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚡ Visual 6502 - WebGPU Cyber-Silicon Renderer</h1>
+        <p>Hardware-accelerated visualization of the MOS 6502 microprocessor</p>
+    </div>
+    
+    <div id="error-message"></div>
+    
+    <div class="container">
+        <div class="canvas-container">
+            <canvas id="webgpu-canvas" width="800" height="600"></canvas>
+        </div>
+        
+        <div class="sidebar">
+            <div class="control-group">
+                <label>Zoom Level</label>
+                <input type="range" id="zoom-slider" min="0.5" max="10" step="0.1" value="1">
+                <div class="control-value" id="zoom-value">1.0x</div>
+            </div>
+            
+            <div class="control-group">
+                <label>Pan X</label>
+                <input type="range" id="pan-x-slider" min="-1" max="1" step="0.01" value="0">
+                <div class="control-value" id="pan-x-value">0.00</div>
+            </div>
+            
+            <div class="control-group">
+                <label>Pan Y</label>
+                <input type="range" id="pan-y-slider" min="-1" max="1" step="0.01" value="0">
+                <div class="control-value" id="pan-y-value">0.00</div>
+            </div>
+            
+            <div class="control-group">
+                <label>Simulation Controls</label>
+                <button class="btn" id="btn-start">Start</button>
+                <button class="btn" id="btn-stop">Stop</button>
+                <button class="btn" id="btn-reset">Reset</button>
+            </div>
+            
+            <div class="control-group">
+                <label>Demo Mode</label>
+                <button class="btn" id="btn-random">Random States</button>
+                <button class="btn" id="btn-wave">Wave Effect</button>
+            </div>
+            
+            <div class="status">
+                <div class="status-item">
+                    <span class="status-label">WebGPU Status</span>
+                    <span class="status-value" id="status-webgpu">Checking...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Nodes</span>
+                    <span class="status-value" id="status-nodes">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Vertices</span>
+                    <span class="status-value" id="status-vertices">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">FPS</span>
+                    <span class="status-value" id="status-fps">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load segdefs for chip geometry -->
+    <script src="segdefs.js"></script>
+    <script src="webgpu-renderer.js"></script>
+    
+    <script>
+        let renderer = null;
+        let demoMode = null;
+        let frameCount = 0;
+        let lastFpsTime = performance.now();
+        
+        // Mock nodes for demo purposes
+        let mockNodes = [];
+        
+        async function init() {
+            const canvas = document.getElementById('webgpu-canvas');
+            const statusWebgpu = document.getElementById('status-webgpu');
+            const statusNodes = document.getElementById('status-nodes');
+            const statusVertices = document.getElementById('status-vertices');
+            const errorMessage = document.getElementById('error-message');
+            
+            // Check WebGPU support
+            if (!navigator.gpu) {
+                statusWebgpu.textContent = 'Not Supported';
+                statusWebgpu.classList.add('error');
+                errorMessage.style.display = 'block';
+                errorMessage.innerHTML = `
+                    <h3>WebGPU Not Available</h3>
+                    <p>Your browser does not support WebGPU. Please try:</p>
+                    <ul>
+                        <li>Chrome 113+ or Edge 113+</li>
+                        <li>Firefox Nightly with WebGPU enabled</li>
+                        <li>Safari Technology Preview with WebGPU enabled</li>
+                    </ul>
+                `;
+                return;
+            }
+            
+            statusWebgpu.textContent = 'Initializing...';
+            
+            // Check if segdefs is available
+            if (typeof segdefs === 'undefined') {
+                statusWebgpu.textContent = 'No Data';
+                statusWebgpu.classList.add('error');
+                errorMessage.style.display = 'block';
+                errorMessage.textContent = 'Segment definitions (segdefs.js) not loaded. Make sure the file exists.';
+                return;
+            }
+            
+            // Create renderer
+            renderer = new WebGPURenderer({
+                canvas: canvas,
+                segdefs: segdefs,
+            });
+            
+            const success = await renderer.init();
+            
+            if (!success) {
+                statusWebgpu.textContent = 'Init Failed';
+                statusWebgpu.classList.add('error');
+                errorMessage.style.display = 'block';
+                errorMessage.textContent = 'Failed to initialize WebGPU renderer. Check console for details.';
+                return;
+            }
+            
+            statusWebgpu.textContent = 'Ready';
+            statusWebgpu.classList.add('success');
+            statusNodes.textContent = renderer.nodeCount.toLocaleString();
+            statusVertices.textContent = renderer.vertexCount.toLocaleString();
+            
+            // Initialize mock nodes
+            mockNodes = new Array(renderer.nodeCount).fill(null).map(() => ({ state: false }));
+            
+            // Start rendering
+            renderer.start();
+            startFpsCounter();
+            
+            // Setup controls
+            setupControls();
+        }
+        
+        function setupControls() {
+            // Zoom control
+            const zoomSlider = document.getElementById('zoom-slider');
+            const zoomValue = document.getElementById('zoom-value');
+            zoomSlider.addEventListener('input', (e) => {
+                const zoom = parseFloat(e.target.value);
+                renderer.setZoom(zoom);
+                zoomValue.textContent = zoom.toFixed(1) + 'x';
+            });
+            
+            // Pan X control
+            const panXSlider = document.getElementById('pan-x-slider');
+            const panXValue = document.getElementById('pan-x-value');
+            panXSlider.addEventListener('input', (e) => {
+                const panX = parseFloat(e.target.value);
+                renderer.setPan(panX, parseFloat(document.getElementById('pan-y-slider').value));
+                panXValue.textContent = panX.toFixed(2);
+            });
+            
+            // Pan Y control
+            const panYSlider = document.getElementById('pan-y-slider');
+            const panYValue = document.getElementById('pan-y-value');
+            panYSlider.addEventListener('input', (e) => {
+                const panY = parseFloat(e.target.value);
+                renderer.setPan(parseFloat(document.getElementById('pan-x-slider').value), panY);
+                panYValue.textContent = panY.toFixed(2);
+            });
+            
+            // Simulation controls
+            document.getElementById('btn-start').addEventListener('click', () => {
+                renderer.start(mockNodes);
+            });
+            
+            document.getElementById('btn-stop').addEventListener('click', () => {
+                renderer.stop();
+                stopDemoMode();
+            });
+            
+            document.getElementById('btn-reset').addEventListener('click', () => {
+                // Reset all states to low
+                mockNodes.forEach(n => n.state = false);
+                renderer.updateNodeStates(mockNodes);
+                stopDemoMode();
+            });
+            
+            // Demo modes
+            document.getElementById('btn-random').addEventListener('click', () => {
+                stopDemoMode();
+                demoMode = setInterval(() => {
+                    // Randomly toggle some nodes
+                    for (let i = 0; i < 100; i++) {
+                        const idx = Math.floor(Math.random() * mockNodes.length);
+                        mockNodes[idx].state = Math.random() > 0.5;
+                    }
+                    renderer.updateNodeStates(mockNodes);
+                }, 100);
+            });
+            
+            document.getElementById('btn-wave').addEventListener('click', () => {
+                stopDemoMode();
+                let phase = 0;
+                demoMode = setInterval(() => {
+                    phase += 0.1;
+                    for (let i = 0; i < mockNodes.length; i++) {
+                        // Create a wave effect based on node index
+                        mockNodes[i].state = Math.sin(i * 0.01 + phase) > 0;
+                    }
+                    renderer.updateNodeStates(mockNodes);
+                }, 50);
+            });
+            
+            // Mouse wheel zoom
+            const canvas = document.getElementById('webgpu-canvas');
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const currentZoom = parseFloat(zoomSlider.value);
+                const delta = e.deltaY > 0 ? -0.2 : 0.2;
+                const newZoom = Math.max(0.5, Math.min(10, currentZoom + delta));
+                zoomSlider.value = newZoom;
+                renderer.setZoom(newZoom);
+                zoomValue.textContent = newZoom.toFixed(1) + 'x';
+            });
+            
+            // Drag to pan
+            let isDragging = false;
+            let lastMouseX = 0;
+            let lastMouseY = 0;
+            
+            canvas.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+                canvas.style.cursor = 'grabbing';
+            });
+            
+            window.addEventListener('mouseup', () => {
+                isDragging = false;
+                canvas.style.cursor = 'grab';
+            });
+            
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                
+                const dx = (e.clientX - lastMouseX) / 400;
+                const dy = (e.clientY - lastMouseY) / 400;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+                
+                const panX = Math.max(-1, Math.min(1, parseFloat(panXSlider.value) + dx));
+                const panY = Math.max(-1, Math.min(1, parseFloat(panYSlider.value) - dy));
+                
+                panXSlider.value = panX;
+                panYSlider.value = panY;
+                panXValue.textContent = panX.toFixed(2);
+                panYValue.textContent = panY.toFixed(2);
+                
+                renderer.setPan(panX, panY);
+            });
+            
+            canvas.style.cursor = 'grab';
+        }
+        
+        function stopDemoMode() {
+            if (demoMode) {
+                clearInterval(demoMode);
+                demoMode = null;
+            }
+        }
+        
+        function startFpsCounter() {
+            const statusFps = document.getElementById('status-fps');
+            
+            setInterval(() => {
+                const now = performance.now();
+                const elapsed = now - lastFpsTime;
+                const fps = Math.round((frameCount * 1000) / elapsed);
+                statusFps.textContent = fps;
+                frameCount = 0;
+                lastFpsTime = now;
+            }, 1000);
+            
+            // Count frames
+            const countFrame = () => {
+                frameCount++;
+                requestAnimationFrame(countFrame);
+            };
+            countFrame();
+        }
+        
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
