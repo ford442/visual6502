@@ -1,6 +1,6 @@
 /**
  * WebGPU Renderer for Visual6502
- * v3.0 - Robust Earcut Implementation
+ * v3.1 - Fixed WGSL Reserved Keyword Bug
  */
 class WebGPURenderer {
     constructor(canvas) {
@@ -225,14 +225,15 @@ class WebGPURenderer {
                 let flow = vec2<f32>(u.time * 0.1, 0.0);
                 let hot = textureSample(texHot, samp, (in.uv * 4.0) + flow);
                 
-                let active = smoothstep(0.1, 0.9, in.state);
+                // RENAMED 'active' to 'signalIntensity'
+                let signalIntensity = smoothstep(0.1, 0.9, in.state);
                 
                 var tint = vec3<f32>(1.0);
                 if (in.layer < 0.5) { tint = vec3<f32>(0.5, 0.7, 1.0); }      // Metal
                 else if (in.layer < 1.5) { tint = vec3<f32>(1.0, 0.3, 0.2); } // Poly
                 else { tint = vec3<f32>(0.2, 1.0, 0.5); }                     // Diffusion
 
-                let final = mix(base.rgb * 0.5, hot.rgb * 2.5 * tint, active);
+                let final = mix(base.rgb * 0.5, hot.rgb * 2.5 * tint, signalIntensity);
                 return vec4<f32>(final, 1.0);
             }
         `;
