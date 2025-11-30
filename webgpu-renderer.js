@@ -1,6 +1,6 @@
 /**
  * WebGPU Renderer for Visual6502
- * v3.1 - Fixed WGSL Reserved Keyword Bug
+ * v3.2 - Fixed 'active' and 'final' reserved keyword bugs
  */
 class WebGPURenderer {
     constructor(canvas) {
@@ -99,7 +99,6 @@ class WebGPURenderer {
 
         // B. Sort Segments by Layer (Diffusion < Poly < Metal)
         // This ensures the metal wires draw ON TOP of the silicon
-        // seg[2] is layer index.
         const sortedSegs = [...segdefs].sort((a, b) => a[2] - b[2]);
 
         // C. Triangulate using Earcut
@@ -201,7 +200,6 @@ class WebGPURenderer {
                 let centered = (world - 0.5) * 2.0;
                 
                 // Aspect Correction (Fit width)
-                // If canvas is wider than tall, y coords need scaling to not look squashed
                 var finalPos = vec2<f32>(centered.x, -centered.y);
                 if (u.aspect > 1.0) {
                     finalPos.x = finalPos.x / u.aspect;
@@ -233,8 +231,10 @@ class WebGPURenderer {
                 else if (in.layer < 1.5) { tint = vec3<f32>(1.0, 0.3, 0.2); } // Poly
                 else { tint = vec3<f32>(0.2, 1.0, 0.5); }                     // Diffusion
 
-                let final = mix(base.rgb * 0.5, hot.rgb * 2.5 * tint, signalIntensity);
-                return vec4<f32>(final, 1.0);
+                // RENAMED 'final' to 'finalColor'
+                let finalColor = mix(base.rgb * 0.5, hot.rgb * 2.5 * tint, signalIntensity);
+                
+                return vec4<f32>(finalColor, 1.0);
             }
         `;
 
