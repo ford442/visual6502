@@ -196,7 +196,10 @@ class WebGPURenderer {
             // Pack nodeIndex and layerType into vertex data
             // Vertex format: x, y, u, v, packedData
             // packedData: lower 24 bits = nodeIndex, upper 8 bits = layerType
-            const packedData = nodeIndex | (layerType << 24);
+            // Clamp nodeIndex to 24 bits (max 16777215) to prevent overflow into layerType bits
+            const clampedNodeIndex = nodeIndex & 0x00FFFFFF;
+            const clampedLayerType = layerType & 0xFF;
+            const packedData = clampedNodeIndex | (clampedLayerType << 24);
             
             // Triangle vertex 0
             vertices.push(nx0, ny0, u0, v0, packedData);
@@ -247,9 +250,11 @@ class WebGPURenderer {
         
         // Node state storage buffer
         // Initialize all states to 0.0 (low)
+        // WebGPU requires a minimum buffer size of 4 bytes for storage buffers
+        const MIN_STORAGE_BUFFER_SIZE = 4;
         const initialStates = new Float32Array(this.nodeCount);
         this.nodeStateBuffer = this.device.createBuffer({
-            size: Math.max(initialStates.byteLength, 4), // Minimum 4 bytes
+            size: Math.max(initialStates.byteLength, MIN_STORAGE_BUFFER_SIZE),
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
         this.device.queue.writeBuffer(this.nodeStateBuffer, 0, initialStates);
@@ -319,7 +324,8 @@ class WebGPURenderer {
         const texture = this.device.createTexture({
             size: [imageBitmap.width, imageBitmap.height],
             format: 'rgba8unorm',
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+            // Only TEXTURE_BINDING and COPY_DST needed for sampling textures
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
         });
         
         this.device.queue.copyExternalImageToTexture(

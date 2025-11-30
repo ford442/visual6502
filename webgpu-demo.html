@@ -376,8 +376,9 @@
             document.getElementById('btn-random').addEventListener('click', () => {
                 stopDemoMode();
                 demoMode = setInterval(() => {
-                    // Randomly toggle some nodes
-                    for (let i = 0; i < 100; i++) {
+                    // Randomly toggle a proportional number of nodes (about 5% per frame)
+                    const nodesToToggle = Math.max(10, Math.floor(mockNodes.length * 0.05));
+                    for (let i = 0; i < nodesToToggle; i++) {
                         const idx = Math.floor(Math.random() * mockNodes.length);
                         mockNodes[idx].state = Math.random() > 0.5;
                     }
