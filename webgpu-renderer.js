@@ -16,8 +16,11 @@ class WebGPURenderer {
 
         this.substrateTexture = null;
         this.activeTexture = null;
+        this.backgroundTexture = null;
         this.sampler = null;
         this.bindGroup = null;
+        this.bgPipeline = null;
+        this.bgBindGroup = null;
 
         this.aspectRatio = 1.0;
         this.isReady = false;
@@ -26,7 +29,7 @@ class WebGPURenderer {
         this.bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity, width: 1, height: 1 };
     }
 
-    async init(segdefs) {
+    async init(segdefs, bgImageUrl) {
         if (!navigator.gpu) throw new Error("WebGPU not supported.");
 
         const adapter = await navigator.gpu.requestAdapter();
@@ -76,9 +79,38 @@ class WebGPURenderer {
             addressModeU: 'repeat', addressModeV: 'repeat'
         });
 
+        if (bgImageUrl) {
+            await this.loadBackgroundTexture(bgImageUrl);
+        }
+
         await this.createPipeline();
+        if (this.backgroundTexture) {
+            await this.createBackgroundPipeline();
+        }
         this.resize(this.canvas.width, this.canvas.height);
         this.isReady = true;
+    }
+
+    async loadBackgroundTexture(url) {
+        try {
+            const response = await fetch(url);
+            const blob = await response.blob();
+            const bitmap = await createImageBitmap(blob);
+
+            this.backgroundTexture = this.device.createTexture({
+                size: [bitmap.width, bitmap.height],
+                format: 'rgba8unorm',
+                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
+            });
+
+            this.device.queue.copyExternalImageToTexture(
+                { source: bitmap },
+                { texture: this.backgroundTexture },
+                [bitmap.width, bitmap.height]
+            );
+        } catch (e) {
+            console.error("Failed to load background texture:", e);
+        }
     }
 
     processGeometry(segdefs) {
@@ -272,6 +304,77 @@ class WebGPURenderer {
         });
     }
 
+    async createBackgroundPipeline() {
+        const shader = `
+            struct Uniforms { time: f32, zoom: f32, pan: vec2<f32>, aspect: f32 };
+            @group(0) @binding(0) var<uniform> u: Uniforms;
+            @group(0) @binding(1) var samp: sampler;
+            @group(0) @binding(2) var bgTex: texture_2d<f32>;
+
+            struct VSOut {
+                @builtin(position) pos: vec4<f32>,
+                @location(0) uv: vec2<f32>,
+            };
+
+            @vertex
+            fn vs_main(@builtin(vertex_index) vIdx: u32) -> VSOut {
+                var out: VSOut;
+
+                // Unit Quad Vertices (0..1)
+                var pos = vec2<f32>(0.0, 0.0);
+                if (vIdx == 1u || vIdx == 4u) { pos = vec2<f32>(1.0, 0.0); }
+                if (vIdx == 2u || vIdx == 3u) { pos = vec2<f32>(0.0, 1.0); }
+                if (vIdx == 5u) { pos = vec2<f32>(1.0, 1.0); }
+
+                // Same Transform as geometry
+                let world = (pos + u.pan) * u.zoom;
+                let centered = (world - 0.5) * 2.0;
+
+                var finalPos = vec2<f32>(centered.x, -centered.y);
+                if (u.aspect > 1.0) {
+                    finalPos.x = finalPos.x / u.aspect;
+                } else {
+                    finalPos.y = finalPos.y * u.aspect;
+                }
+
+                out.pos = vec4<f32>(finalPos, 0.99, 1.0); // Z=0.99 (behind geometry at Z=0)
+                out.uv = pos; // UV matches 0..1 unit space
+                out.uv.y = 1.0 - out.uv.y; // Flip Y for texture mapping if needed
+
+                return out;
+            }
+
+            @fragment
+            fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
+                let color = textureSample(bgTex, samp, in.uv);
+                return vec4<f32>(color.rgb * 0.4, 1.0); // Dim it slightly
+            }
+        `;
+
+        const module = this.device.createShaderModule({ code: shader });
+
+        this.bgPipeline = this.device.createRenderPipeline({
+            layout: 'auto',
+            vertex: {
+                module: module, entryPoint: 'vs_main'
+            },
+            fragment: {
+                module: module, entryPoint: 'fs_main',
+                targets: [{ format: this.format }]
+            },
+            primitive: { topology: 'triangle-list' }
+        });
+
+        this.bgBindGroup = this.device.createBindGroup({
+            layout: this.bgPipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: this.uniformBuffer } },
+                { binding: 1, resource: this.sampler },
+                { binding: 2, resource: this.backgroundTexture.createView() }
+            ]
+        });
+    }
+
     updateNodeStates(nodes) {
         if (!this.isReady) return;
         const data = new Float32Array(nodes.length);
@@ -294,6 +397,13 @@ class WebGPURenderer {
                 loadOp: 'clear', storeOp: 'store'
             }]
         });
+
+        // Draw Background
+        if (this.bgPipeline && this.bgBindGroup) {
+            pass.setPipeline(this.bgPipeline);
+            pass.setBindGroup(0, this.bgBindGroup);
+            pass.draw(6); // 2 triangles
+        }
 
         pass.setPipeline(this.pipeline);
         pass.setBindGroup(0, this.bindGroup);
