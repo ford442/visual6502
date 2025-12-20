@@ -29,16 +29,65 @@ var logThese=[];
 var chipname='6502';
 var nodenamereset='res';
 var presetLogLists=[
-		['cycle'],
-		['ab','db','rw','Fetch','pc','a','x','y','s','p'],
-		['Execute','State'],
-		['ir','tcstate','-pd'],
-		['adl','adh','sb','alu'],
-		['alucin','alua','alub','alucout','aluvout','dasb'],
-		['plaOutputs','DPControl'],
-		['idb','dor'],
-		['irq','nmi',nodenamereset],
-	];
+        ['cycle'],
+        ['ab','db','rw','Fetch','pc','a','x','y','s','p'],
+        ['Execute','State'],
+        ['ir','tcstate','-pd'],
+        ['adl','adh','sb','alu'],
+        ['alucin','alua','alub','alucout','aluvout','dasb'],
+        ['plaOutputs','DPControl'],
+        ['idb','dor'],
+        ['irq','nmi',nodenamereset],
+];
+
+var bytesProcessed = 0;
+function resetBytesProcessed(){
+        bytesProcessed = 0;
+}
+function trackBytesProcessed(count){
+        bytesProcessed += (count || 0);
+        performanceMonitor.recordBytes(count || 0);
+}
+function reportBytesProcessed(){
+        return bytesProcessed;
+}
+
+var performanceMonitor = {
+        totalNodeWork: 0,
+        transistorSwitches: 0,
+        halfSteps: 0,
+        lastSnapshotTime: now(),
+        lastBytes: 0,
+        bytesPerSecond: 0,
+        recordNodeSweep: function(count){
+                if(!count) return;
+                this.totalNodeWork += count;
+        },
+        recordTransistorSwitch: function(){
+                this.transistorSwitches++;
+        },
+        recordHalfStep: function(){
+                this.halfSteps++;
+                this.maybeRefreshThroughput();
+        },
+        recordBytes: function(count){
+                if(!count) return;
+                this.maybeRefreshThroughput();
+        },
+        maybeRefreshThroughput: function(){
+                var nowMs = now();
+                var elapsed = nowMs - this.lastSnapshotTime;
+                if(elapsed < 500) return;
+                var currentBytes = reportBytesProcessed();
+                var delta = currentBytes - this.lastBytes;
+                this.bytesPerSecond = elapsed ? Math.round(delta*1000/elapsed) : 0;
+                this.lastBytes = currentBytes;
+                this.lastSnapshotTime = nowMs;
+        },
+        getSummary: function(){
+                return 'nodes:' + this.totalNodeWork + ' switches:' + this.transistorSwitches + ' b/s:' + this.bytesPerSecond;
+        }
+};
 
 function loadProgram(){
 	// a moderate size of static testprogram might be loaded
@@ -160,6 +209,7 @@ function initChip(){
 	refresh();
 	cycle = 0;
 	trace = Array();
+	resetBytesProcessed();
 	if(typeof expertMode != "undefined")
 		updateLogList();
 	chipStatus();
@@ -461,11 +511,14 @@ function writeDataBus(x){
 }
 
 function mRead(a){
-	if(memory[a]==undefined) return 0;
-	else return memory[a];
+        trackBytesProcessed(1);
+        if(memory[a]==undefined) return 0;
+        else return memory[a];
 }
 
-function mWrite(a, d){memory[a]=d;}
+function mWrite(a, d){memory[a]=d;
+        trackBytesProcessed(1);
+}
 
 function clkNodes(){
 	var res = Array();
@@ -524,7 +577,7 @@ function chipStatus(){
 	var machine1 =
 	        ' halfcyc:' + cycle +
 	        ' phi0:' + readBit('clk0') +
-                ' AB:' + hexWord(ab) +
+	        ' AB:' + hexWord(ab) +
 	        ' D:' + hexByte(readDataBus()) +
 	        ' RnW:' + readBit('rw');
 	var machine2 =
@@ -536,6 +589,7 @@ function chipStatus(){
 	        ' ' + readPstring();
 	var machine3 = 
 		'Hz: ' + estimatedHz().toFixed(1);
+		machine3 += ' Bytes:' + bytesProcessed;
 	if(typeof expertMode != "undefined") {
 		machine3 += ' Exec: ' + busToString('Execute') + '(' + busToString('State') + ')';
 		if(isNodeHigh(nodenames['sync']))

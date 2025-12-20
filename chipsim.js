@@ -32,8 +32,10 @@ function recalcNodeList(list){
 	var n = list[0];
 	recalclist = new Array();
 	recalcHash = new Array();
-	for(var j=0;j<100;j++){		// loop limiter
+	for(var j=0;j<100;j++){ 		// loop limiter
 		if(list.length==0) return;
+		if(typeof performanceMonitor != 'undefined')
+			performanceMonitor.recordNodeSweep(list.length);
 		if(ctrace) {
 			var i;
 			for(i=0;i<traceTheseNodes.length;i++) {
@@ -72,6 +74,8 @@ function recalcNode(node){
 
 function turnTransistorOn(t){
 	if(t.on) return;
+	if(typeof performanceMonitor != 'undefined')
+		performanceMonitor.recordTransistorSwitch();
 	if(ctrace && (traceTheseTransistors.indexOf(t.name)!=-1))
 		console.log(t.name, 'on', t.gate, t.c1, t.c2);
 	t.on = true;
@@ -80,6 +84,8 @@ function turnTransistorOn(t){
 
 function turnTransistorOff(t){
 	if(!t.on) return;
+	if(typeof performanceMonitor != 'undefined')
+		performanceMonitor.recordTransistorSwitch();
 	if(ctrace && (traceTheseTransistors.indexOf(t.name)!=-1))
 		console.log(t.name, 'off', t.gate, t.c1, t.c2);
 	t.on = false;
