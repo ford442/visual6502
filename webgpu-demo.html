@@ -39,7 +39,7 @@
                 
                 // Allow UI to update before heavy processing
                 setTimeout(async () => {
-                    await renderer.init(segdefs);
+                    await renderer.init(segdefs, 'images/chip_bg.bmp');
                     status.innerText = "Running WebGPU";
                     loop();
                 }, 100);
